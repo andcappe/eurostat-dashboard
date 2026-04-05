@@ -87,6 +87,9 @@ LAG_OPTIONS = [{"label": f"L{k}", "value": k} for k in range(13)]
 # FUNZIONI API EUROSTAT
 # ═══════════════════════════════════════════════════════════════════════════════
 
+_TOC_CACHE: dict | None = None   # cache in memoria del catalogo Eurostat
+
+
 def _fetch_json(url: str, timeout: int = 35) -> dict | None:
     try:
         req = urllib.request.Request(
@@ -121,9 +124,12 @@ def search_datasets(query: str) -> list[dict]:
     }
     kws_en = [_IT_EN.get(k, k) for k in kws]
 
-    # ── TOC completo Eurostat ─────────────────────────────────────────────────
-    toc_url = f"{EUROSTAT_BASE}/catalogue/toc/json?lang=en"
-    toc = _fetch_json(toc_url, timeout=50)
+    # ── TOC completo Eurostat (cachato in memoria dopo il primo download) ────────
+    global _TOC_CACHE
+    if _TOC_CACHE is None:
+        toc_url = f"{EUROSTAT_BASE}/catalogue/toc/json?lang=en"
+        _TOC_CACHE = _fetch_json(toc_url, timeout=50)
+    toc = _TOC_CACHE
     if toc is None:
         return []
 
@@ -1817,8 +1823,20 @@ def run_adl(n, store, y_col, y_tr, ar_lags, x_active, x_ids, x_trs, x_lags_list,
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# AVVIO
+# AVVIO — precarica il TOC Eurostat in background al lancio del server
 # ═══════════════════════════════════════════════════════════════════════════════
+
+import threading
+
+def _preload_toc():
+    global _TOC_CACHE
+    print("  [startup] precaricamento catalogo Eurostat...")
+    toc_url = f"{EUROSTAT_BASE}/catalogue/toc/json?lang=en"
+    _TOC_CACHE = _fetch_json(toc_url, timeout=60)
+    n = sum(1 for _ in str(_TOC_CACHE)) if _TOC_CACHE else 0
+    print(f"  [startup] catalogo pronto ({n:,} chars)")
+
+threading.Thread(target=_preload_toc, daemon=True).start()
 
 if __name__ == "__main__":
     app.run(debug=True, port=8052)
