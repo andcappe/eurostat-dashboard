@@ -101,37 +101,41 @@ def _fetch_json(url: str, timeout: int = 35) -> dict | None:
 def search_datasets(query: str) -> list[dict]:
     """
     Cerca dataset nel catalogo Eurostat per parola chiave.
-    Prova prima l'API di ricerca, poi fa fallback sul TOC completo.
-    Ritorna lista di dict {code, title, lastUpdate, type}.
+    Usa il TOC completo (stabile) filtrando in Python.
+    Ritorna lista di dict {code, title, lastUpdate}.
     """
-    q = urllib.parse.quote(query.strip())
+    kws = query.strip().lower().split()
+    if not kws:
+        return []
 
-    # ── Tentativo 1: API di ricerca diretta ──────────────────────────────────
-    url = f"{EUROSTAT_BASE}/catalogue/datasets?lang=en&query={q}&limit=60"
-    data = _fetch_json(url, timeout=20)
-    if data is not None:
-        items = data if isinstance(data, list) else data.get("dataset",
-                data.get("results", data.get("datasets", [])))
-        results = []
-        for item in items:
-            code  = item.get("code", item.get("id", ""))
-            title = item.get("title", item.get("label", code))
-            if isinstance(title, dict):
-                title = title.get("en", next(iter(title.values()), code))
-            lu = item.get("lastUpdate", item.get("dataEnd", ""))
-            if code:
-                results.append({"code": code, "title": str(title), "lastUpdate": lu})
-        if results:
-            return results
+    # ── Traduzione termini italiani comuni → inglese ─────────────────────────
+    _IT_EN = {
+        "prezzi": "price", "inflazione": "inflation", "moneta": "money",
+        "lavoro": "labour", "disoccupazione": "unemployment",
+        "pil": "gdp", "commercio": "trade", "popolazione": "population",
+        "energia": "energy", "salari": "wages", "debito": "debt",
+        "banca": "bank", "tasso": "rate", "esportazioni": "export",
+        "importazioni": "import", "produzione": "production",
+        "costruzioni": "construction", "agricoltura": "agriculture",
+        "istruzione": "education", "salute": "health", "trasporti": "transport",
+    }
+    kws_en = [_IT_EN.get(k, k) for k in kws]
 
-    # ── Tentativo 2: TOC completo (filtra in Python) ──────────────────────────
+    # ── TOC completo Eurostat ─────────────────────────────────────────────────
     toc_url = f"{EUROSTAT_BASE}/catalogue/toc/json?lang=en"
-    toc = _fetch_json(toc_url, timeout=40)
+    toc = _fetch_json(toc_url, timeout=50)
     if toc is None:
         return []
 
     results = []
-    kws = query.lower().split()
+
+    def _match(text: str) -> bool:
+        t = text.lower()
+        # match se almeno uno dei termini (originale o tradotto) è presente
+        for orig, eng in zip(kws, kws_en):
+            if orig in t or eng in t:
+                return True
+        return False
 
     def _walk(node):
         if isinstance(node, list):
@@ -143,14 +147,14 @@ def search_datasets(query: str) -> list[dict]:
             if isinstance(title, dict):
                 title = title.get("en", "")
             ntype = node.get("type", "")
-            if code and ntype in ("dataset", "table") and all(k in (code + " " + title).lower() for k in kws):
+            if code and ntype in ("dataset", "table") and _match(code + " " + title):
                 lu = node.get("lastUpdate", node.get("dataEnd", ""))
                 results.append({"code": code, "title": str(title), "lastUpdate": lu})
             for child in node.get("children", []):
                 _walk(child)
 
     _walk(toc)
-    return results[:60]
+    return results[:80]
 
 
 def get_dataset_metadata(code: str) -> dict | None:
@@ -357,10 +361,17 @@ def _tab_search():
         html.Div(id="search-status", style=_STS),
 
         # ── Risultati ricerca ─────────────────────────────────────────────────
-        html.Div(id="search-results-container",
+        dcc.Loading(
+            id="search-loading",
+            type="circle",
+            color="#1a5276",
+            overlay_style={"visibility": "visible", "filter": "blur(1px)"},
+            children=html.Div(id="search-results-container",
                  style={"max-height": "340px", "overflow-y": "auto",
                         "border": "1px solid #dee2e6", "border-radius": "4px",
-                        "margin-bottom": "16px", "background": "#fafafa"}),
+                        "margin-bottom": "16px", "background": "#fafafa",
+                        "min-height": "40px"}),
+        ),
 
         html.Hr(style={"margin": "16px 0"}),
 
@@ -772,6 +783,7 @@ app.layout = html.Div([
 def do_search(n, query):
     if not query or not query.strip():
         return no_update, "⚠ Inserisci almeno una parola chiave.", no_update
+    # Il TOC Eurostat è grande (~5 MB) — la prima chiamata può richiedere 5-15 secondi
     results = search_datasets(query.strip())
     if not results:
         return [], f"❌ Nessun risultato per '{query}'. Prova termini in inglese.", html.Div(
