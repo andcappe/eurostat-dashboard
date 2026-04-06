@@ -29,6 +29,71 @@ warnings.filterwarnings("ignore")
 # ═══════════════════════════════════════════════════════════════════════════════
 
 EUROSTAT_BASE = "https://ec.europa.eu/eurostat/api/dissemination"
+ECB_BASE      = "https://data-api.ecb.europa.eu/service"
+
+# ── Catalogo serie ECB precaricate per categoria ──────────────────────────────
+ECB_CATALOGUE = {
+    "Moneta & Credito": {
+        "M1 (Area Euro)":          ("BSI", "M.U2.EUR.LT.F.A20.M.I.U6.2150.Z01.E"),
+        "M2 (Area Euro)":          ("BSI", "M.U2.EUR.LT.F.A21.M.I.U6.2150.Z01.E"),
+        "M3 (Area Euro)":          ("BSI", "M.U2.EUR.LT.F.A52.M.I.U6.2150.Z01.E"),
+        "Credito a privati":       ("BSI", "M.U2.EUR.LT.F.A20T.M.I.U6.2150.Z01.E"),
+        "Prestiti a famiglie":     ("BSI", "M.U2.EUR.LT.F.A20H.M.I.U6.2150.Z01.E"),
+        "Prestiti a imprese":      ("BSI", "M.U2.EUR.LT.F.A20NF.M.I.U6.2150.Z01.E"),
+    },
+    "Tassi BCE": {
+        "Tasso depositi BCE":      ("FM", "B.U2.EUR.4F.KR.DFR.LEV"),
+        "Tasso operaz. principali":("FM", "B.U2.EUR.4F.KR.MRR_FR.LEV"),
+        "Tasso rifinanziamento marginale":("FM", "B.U2.EUR.4F.KR.MLFR.LEV"),
+        "ESTR overnight":          ("EST", "B.EU000A2X2A25.WT"),
+        "EURIBOR 3 mesi":          ("FM", "B.U2.EUR.RT.MM.EURIBOR3MD_.HSTA"),
+        "EURIBOR 6 mesi":          ("FM", "B.U2.EUR.RT.MM.EURIBOR6MD_.HSTA"),
+        "EURIBOR 12 mesi":         ("FM", "B.U2.EUR.RT.MM.EURIBOR1YD_.HSTA"),
+    },
+    "Rendimenti governativi": {
+        "BTP Italia 10 anni":      ("IRS", "M.IT.L.L40.CI.0.EUR.N.Z"),
+        "Bund Germania 10 anni":   ("IRS", "M.DE.L.L40.CI.0.EUR.N.Z"),
+        "OAT Francia 10 anni":     ("IRS", "M.FR.L.L40.CI.0.EUR.N.Z"),
+        "Bonos Spagna 10 anni":    ("IRS", "M.ES.L.L40.CI.0.EUR.N.Z"),
+        "Spread BTP-Bund":         ("IRS", "M.IT.L.L40.CI.0.EUR.N.Z"),
+    },
+    "Inflazione & Prezzi": {
+        "HICP Area Euro (totale)": ("ICP", "M.U2.N.000000.4.INX"),
+        "HICP energia":            ("ICP", "M.U2.N.NRG.4.INX"),
+        "HICP alimentari":         ("ICP", "M.U2.N.FOOD.4.INX"),
+        "HICP core (ex energy/food)":("ICP", "M.U2.N.XEF.4.INX"),
+        "HICP servizi":            ("ICP", "M.U2.N.SERV.4.INX"),
+        "HICP beni industriali":   ("ICP", "M.U2.N.IGD.4.INX"),
+    },
+    "Cambi": {
+        "EUR/USD":                 ("EXR", "D.USD.EUR.SP00.A"),
+        "EUR/GBP":                 ("EXR", "D.GBP.EUR.SP00.A"),
+        "EUR/JPY":                 ("EXR", "D.JPY.EUR.SP00.A"),
+        "EUR/CHF":                 ("EXR", "D.CHF.EUR.SP00.A"),
+        "EUR/CNY":                 ("EXR", "D.CNY.EUR.SP00.A"),
+        "Tasso effettivo nominale":("EXR", "M.Z15.EUR.ERC0.A"),
+    },
+    "Conti Nazionali (MNA)": {
+        "PIL nominale Area Euro":  ("MNA", "Q.Y.I8.W2.S1.S1.B.B1GQ._Z._Z._Z.EUR.V.N"),
+        "PIL reale Area Euro":     ("MNA", "Q.Y.I8.W2.S1.S1.B.B1GQ._Z._Z._Z.EUR.LR.N"),
+        "Consumi privati":         ("MNA", "Q.Y.I8.W2.S1M.S1.D.P31._Z._Z._Z.EUR.V.N"),
+        "Investimenti fissi lordi":("MNA", "Q.Y.I8.W2.S1.S1.D.P51G._Z._Z._Z.EUR.V.N"),
+        "Esportazioni beni/servizi":("MNA","Q.Y.I8.W2.S1.S1.D.P6._Z._Z._Z.EUR.V.N"),
+        "Importazioni beni/servizi":("MNA","Q.Y.I8.W2.S1.S1.D.P7._Z._Z._Z.EUR.V.N"),
+    },
+    "Mercato del Lavoro": {
+        "Tasso disoccupazione EA": ("LFSI", "M.I8.S.UN_PER.TOTAL.PC_ACT.T"),
+        "Tasso disoccupazione IT": ("LFSI", "M.IT.S.UN_PER.TOTAL.PC_ACT.T"),
+        "Tasso disoccupazione DE": ("LFSI", "M.DE.S.UN_PER.TOTAL.PC_ACT.T"),
+        "Tasso disoccupazione FR": ("LFSI", "M.FR.S.UN_PER.TOTAL.PC_ACT.T"),
+        "Tasso disoccupazione ES": ("LFSI", "M.ES.S.UN_PER.TOTAL.PC_ACT.T"),
+    },
+    "Bilancia dei Pagamenti": {
+        "Conto corrente EA":       ("BOP", "M.U2.W1.S1.S1.T.A.FA._T.F._Z.EUR._T.M"),
+        "Investimenti diretti esteri":("BOP","M.U2.W1.S1.S1.T.A.FA.D.F._Z.EUR._T.M"),
+        "Riserve BCE":             ("BOP", "M.U2.W1.S121.S1.T.A.FA.R.F._Z.EUR._T.M"),
+    },
+}
 
 GEO_OPTIONS = [
     {"label": "Area Euro (EA20)",  "value": "EA20"},
@@ -193,6 +258,75 @@ def _build_catalogue() -> dict:
             break
 
     return {"dataflows": dataflows, "tree": tree}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FUNZIONI API BCE (ECB Statistical Data Warehouse)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def download_ecb_series(flow: str, key: str, label: str) -> pd.Series | None:
+    """
+    Scarica una serie dall'API SDMX-JSON della BCE.
+    flow: es. 'BSI', 'EXR', 'ICP', 'FM'
+    key : es. 'M.U2.EUR.LT.F.A52.M.I.U6.2150.Z01.E'
+    """
+    url = (f"{ECB_BASE}/data/{flow}/{key}"
+           f"?format=jsondata&detail=dataonly&startPeriod=1990-01")
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "EurostatExplorer/2.0",
+            "Accept":     "application/json",
+        })
+        with urllib.request.urlopen(req, timeout=40) as r:
+            raw = json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        print(f"  ECB error [{flow}/{key[:40]}]: {e}")
+        return None
+
+    try:
+        ds  = raw["dataSets"][0]
+        obs = raw["structure"]["dimensions"]["observation"][0]  # TIME_PERIOD
+        times = [v["id"] for v in obs["values"]]
+
+        # Prende la prima serie disponibile
+        series_data = ds.get("series", {})
+        if not series_data:
+            return None
+        first_key = next(iter(series_data))
+        observations = series_data[first_key].get("observations", {})
+
+        result = {}
+        for idx_str, val_list in observations.items():
+            idx = int(idx_str)
+            v   = val_list[0]
+            if v is not None and idx < len(times):
+                result[times[idx]] = float(v)
+
+        if not result:
+            return None
+
+        s = pd.Series(result).sort_index()
+
+        # Parse formati data BCE: YYYY-MM, YYYY-QN, YYYY
+        sample = str(s.index[0])
+        if len(sample) == 7 and "-Q" in sample:
+            s.index = pd.PeriodIndex(s.index, freq="Q").to_timestamp()
+            s = s.reindex(pd.date_range(s.index.min(), s.index.max(), freq="MS")).ffill()
+        elif len(sample) == 7 and "-" in sample:
+            s.index = pd.to_datetime(s.index, format="%Y-%m")
+        elif len(sample) == 4:
+            s.index = pd.to_datetime(s.index, format="%Y")
+            s = s.reindex(pd.date_range(s.index.min(), s.index.max(), freq="MS")).ffill()
+        else:
+            s.index = pd.to_datetime(s.index, errors="coerce")
+            s = s.dropna()
+
+        s.name = label
+        return s.sort_index().dropna()
+
+    except Exception as e:
+        print(f"  ECB parse [{flow}/{key[:40]}]: {e}")
+        return None
 
 
 def search_datasets(query: str) -> list[dict]:
@@ -825,8 +959,101 @@ def _tab_browse():
     ], style={"padding": "16px", "max-width": "960px"})
 
 
+def _tab_ecb():
+    """Tab BCE — serie dal database statistico della Banca Centrale Europea."""
+
+    # Costruisce l'elenco sezioni dal catalogo
+    sections = []
+    for cat_name, series_dict in ECB_CATALOGUE.items():
+        rows = []
+        for label, (flow, key) in series_dict.items():
+            rows.append(html.Div([
+                html.Span(label,
+                          style={"font-size": "11px", "color": "#1a3a5c",
+                                 "flex": "1"}),
+                html.Span(f"{flow}/{key[:28]}…" if len(key) > 28 else f"{flow}/{key}",
+                          style={"font-family": "monospace", "font-size": "9px",
+                                 "color": "#888", "min-width": "220px",
+                                 "margin-right": "8px"}),
+                html.Button("Scarica",
+                            id={"type": "btn-ecb-series",
+                                "flow": flow, "key": key, "label": label},
+                            n_clicks=0,
+                            style={"font-size": "9px", "padding": "2px 10px",
+                                   "background": "#003399", "color": "white",
+                                   "border": "none", "border-radius": "3px",
+                                   "cursor": "pointer", "flex-shrink": "0"}),
+            ], style={"display": "flex", "align-items": "center",
+                      "padding": "5px 8px", "border-bottom": "1px solid #eee",
+                      "gap": "8px"}))
+
+        sections.append(html.Details([
+            html.Summary(cat_name,
+                         style={"cursor": "pointer", "padding": "6px 12px",
+                                "font-size": "12px", "font-weight": "700",
+                                "color": "#00205b", "background": "#dce6f5",
+                                "border-radius": "4px", "user-select": "none"}),
+            html.Div(rows, style={"padding-left": "10px",
+                                   "border-left": "3px solid #003399",
+                                   "margin-left": "8px"}),
+        ], style={"margin-bottom": "6px"}))
+
+    return html.Div([
+        # Header BCE
+        html.Div([
+            html.Span("🏦", style={"font-size": "22px", "margin-right": "10px"}),
+            html.Span("BCE — Statistical Data Warehouse",
+                      style={"font-size": "15px", "font-weight": "bold",
+                             "color": "#00205b"}),
+            html.Span(" — dati pubblici, nessuna API key",
+                      style={"font-size": "11px", "color": "#888",
+                             "margin-left": "8px"}),
+        ], style={"display": "flex", "align-items": "center",
+                  "margin-bottom": "12px"}),
+
+        html.Div(id="ecb-status", style={**_STS, "margin-bottom": "10px"}),
+
+        # Sezioni catalogo
+        html.Div(sections, style={"margin-bottom": "20px"}),
+
+        html.Hr(),
+
+        # Input avanzato codice libero
+        html.Div("Codice BCE avanzato (flow / key)", style=_HDR),
+        html.P("Inserisci manualmente il codice dataflow e la chiave serie dal "
+               "database BCE. Es: EXR / D.USD.EUR.SP00.A",
+               style={"font-size": "11px", "color": "#555", "margin-bottom": "8px"}),
+        html.Div([
+            dcc.Input(id="ecb-custom-flow", type="text", placeholder="Flow (es. EXR)",
+                      style={"width": "100px", "font-size": "11px", "padding": "5px 8px",
+                             "border": "1px solid #ced4da", "border-radius": "4px 0 0 4px"}),
+            html.Span("/", style={"padding": "6px", "background": "#f0f4fa",
+                                  "border": "1px solid #ced4da", "border-left": "none",
+                                  "font-size": "14px", "color": "#555"}),
+            dcc.Input(id="ecb-custom-key", type="text",
+                      placeholder="Key (es. D.USD.EUR.SP00.A)",
+                      style={"flex": "1", "font-size": "11px", "padding": "5px 8px",
+                             "border": "1px solid #ced4da", "border-right": "none",
+                             "border-left": "none"}),
+            dcc.Input(id="ecb-custom-label", type="text",
+                      placeholder="Nome serie",
+                      style={"width": "160px", "font-size": "11px", "padding": "5px 8px",
+                             "border": "1px solid #ced4da"}),
+            html.Button("Scarica", id="btn-ecb-custom", n_clicks=0,
+                        style={**_BTN, "width": "auto", "border-radius": "0 4px 4px 0",
+                               "padding": "5px 14px", "background": "#003399"}),
+        ], style={"display": "flex", "margin-bottom": "8px"}),
+
+        html.A("Cerca codici su sdw.ecb.europa.eu →",
+               href="https://sdw.ecb.europa.eu/browse.do?node=9691110",
+               target="_blank",
+               style={"font-size": "10px", "color": "#003399"}),
+
+    ], style={"padding": "16px", "max-width": "980px"})
+
+
 def _tab_info():
-    """Tab ⑥ — Guida all'uso."""
+    """Tab ⑦ — Guida all'uso."""
     def _section(title, items):
         return html.Div([
             html.H4(title, style={"color": "#1565c0", "margin-bottom": "6px"}),
@@ -956,12 +1183,110 @@ app.layout = html.Div([
     dcc.Tabs(id="main-tabs", value="tab-search", children=[
         dcc.Tab(label="🔍  Ricerca",    value="tab-search",  children=[_tab_search()]),
         dcc.Tab(label="🗂  Sfoglia",    value="tab-browse",  children=[_tab_browse()]),
+        dcc.Tab(label="🏦  BCE",        value="tab-ecb",     children=[_tab_ecb()]),
         dcc.Tab(label="📊  Dati",       value="tab-data",    children=[_tab_data()]),
         dcc.Tab(label="〜  ARIMA",      value="tab-arima",   children=[_tab_arima()]),
         dcc.Tab(label="📐  ADL",        value="tab-adl",     children=[_tab_adl()]),
         dcc.Tab(label="ℹ  Guida",      value="tab-info",    children=[_tab_info()]),
     ], style={"font-size": "12px"}),
 ])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CALLBACKS — TAB BCE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.callback(
+    Output("store-series",  "data",     allow_duplicate=True),
+    Output("ecb-status",    "children"),
+    Output("store-loading-state", "data", allow_duplicate=True),
+    Output("main-tabs",     "value",    allow_duplicate=True),
+    Input({"type": "btn-ecb-series", "flow": ALL, "key": ALL, "label": ALL}, "n_clicks"),
+    State("store-series",   "data"),
+    prevent_initial_call=True,
+)
+def ecb_download_preset(clicks, existing):
+    ctx = callback_context
+    _done = {"active": False}
+    if not ctx.triggered or all((c or 0) == 0 for c in clicks):
+        raise PreventUpdate
+    prop = ctx.triggered[0]["prop_id"]
+    try:
+        btn_id = json.loads(prop.split(".")[0])
+        flow   = btn_id["flow"]
+        key    = btn_id["key"]
+        label  = btn_id["label"]
+    except Exception:
+        raise PreventUpdate
+
+    series = download_ecb_series(flow, key, label)
+    if series is None or series.empty:
+        return no_update, f"❌ Nessun dato per {flow}/{key[:30]}...", _done, no_update
+
+    store = existing or {}
+    store[label] = {
+        "data": series.to_json(date_format="iso", orient="split"),
+        "code": f"ECB:{flow}",
+        "geo":  "ECB",
+    }
+    d1  = series.index.min().strftime("%Y-%m")
+    d2  = series.index.max().strftime("%Y-%m")
+    msg = f"✅  '{label}'  |  {len(series)} obs  |  {d1} → {d2}"
+    return store, msg, _done, "tab-data"
+
+
+@app.callback(
+    Output("store-series",  "data",     allow_duplicate=True),
+    Output("ecb-status",    "children", allow_duplicate=True),
+    Output("store-loading-state", "data", allow_duplicate=True),
+    Output("main-tabs",     "value",    allow_duplicate=True),
+    Input("btn-ecb-custom", "n_clicks"),
+    State("ecb-custom-flow",  "value"),
+    State("ecb-custom-key",   "value"),
+    State("ecb-custom-label", "value"),
+    State("store-series",     "data"),
+    prevent_initial_call=True,
+)
+def ecb_download_custom(n, flow, key, label, existing):
+    _done = {"active": False}
+    if not flow or not key:
+        return no_update, "⚠ Inserisci flow e key.", _done, no_update
+    flow  = flow.strip().upper()
+    key   = key.strip()
+    label = (label or f"ECB {flow}/{key[:20]}").strip()
+
+    series = download_ecb_series(flow, key, label)
+    if series is None or series.empty:
+        return no_update, f"❌ Nessun dato per {flow}/{key[:40]}. Verifica flow e key.", _done, no_update
+
+    store = existing or {}
+    store[label] = {
+        "data": series.to_json(date_format="iso", orient="split"),
+        "code": f"ECB:{flow}",
+        "geo":  "ECB",
+    }
+    d1  = series.index.min().strftime("%Y-%m")
+    d2  = series.index.max().strftime("%Y-%m")
+    msg = f"✅  '{label}'  |  {len(series)} obs  |  {d1} → {d2}"
+    return store, msg, _done, "tab-data"
+
+
+# ── Clientside: mostra overlay anche per bottoni ECB ─────────────────────────
+app.clientside_callback(
+    """
+    function(...args) {
+        var n = args.slice(0, args.length - 1);
+        var triggered = window.dash_clientside.callback_context &&
+                        window.dash_clientside.callback_context.triggered;
+        if (!triggered || triggered.length === 0) return window.dash_clientside.no_update;
+        return {"active": true};
+    }
+    """,
+    Output("store-loading-state", "data", allow_duplicate=True),
+    Input({"type": "btn-ecb-series", "flow": ALL, "key": ALL, "label": ALL}, "n_clicks"),
+    Input("btn-ecb-custom", "n_clicks"),
+    prevent_initial_call=True,
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
