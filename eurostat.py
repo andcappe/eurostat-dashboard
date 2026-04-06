@@ -1234,7 +1234,7 @@ def ecb_download_preset(clicks, existing):
         raise PreventUpdate
     prop = ctx.triggered[0]["prop_id"]
     try:
-        btn_id = json.loads(prop.split(".")[0])
+        btn_id = json.loads(prop.rsplit(".", 1)[0])
         flow   = btn_id["flow"]
         key    = btn_id["key"]
         label  = btn_id["label"]
@@ -1400,7 +1400,7 @@ def select_dataset(clicks, results):
         raise PreventUpdate
     prop = ctx.triggered[0]["prop_id"]
     try:
-        code = json.loads(prop.split(".")[0])["index"]
+        code = json.loads(prop.rsplit(".", 1)[0])["index"]
     except Exception:
         raise PreventUpdate
     # cerca titolo prima in store-search-results, poi nel catalogo globale
