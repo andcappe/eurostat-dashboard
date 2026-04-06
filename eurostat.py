@@ -1219,17 +1219,15 @@ app.layout = html.Div([
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.callback(
-    Output("store-series",  "data",     allow_duplicate=True),
+    Output("store-series",  "data",  allow_duplicate=True),
     Output("ecb-status",    "children"),
-    Output("store-loading-state", "data", allow_duplicate=True),
-    Output("main-tabs",     "value",    allow_duplicate=True),
+    Output("main-tabs",     "value", allow_duplicate=True),
     Input({"type": "btn-ecb-series", "flow": ALL, "key": ALL, "label": ALL}, "n_clicks"),
     State("store-series",   "data"),
     prevent_initial_call=True,
 )
 def ecb_download_preset(clicks, existing):
     ctx = callback_context
-    _done = {"active": False}
     if not ctx.triggered or all((c or 0) == 0 for c in clicks):
         raise PreventUpdate
     prop = ctx.triggered[0]["prop_id"]
@@ -1238,12 +1236,14 @@ def ecb_download_preset(clicks, existing):
         flow   = btn_id["flow"]
         key    = btn_id["key"]
         label  = btn_id["label"]
-    except Exception:
+    except Exception as e:
+        print(f"  ECB preset parse error: {e}, prop={prop[:80]}")
         raise PreventUpdate
 
+    print(f"  ECB download: {flow}/{key} [{label}]")
     series = download_ecb_series(flow, key, label)
     if series is None or series.empty:
-        return no_update, f"❌ Nessun dato per {flow}/{key[:30]}...", _done, no_update
+        return no_update, f"❌ Nessun dato per {flow}/{key[:30]}...", no_update
 
     store = existing or {}
     store[label] = {
@@ -1254,13 +1254,12 @@ def ecb_download_preset(clicks, existing):
     d1  = series.index.min().strftime("%Y-%m")
     d2  = series.index.max().strftime("%Y-%m")
     msg = f"✅  '{label}'  |  {len(series)} obs  |  {d1} → {d2}"
-    return store, msg, _done, "tab-data"
+    return store, msg, "tab-data"
 
 
 @app.callback(
     Output("store-series",  "data",     allow_duplicate=True),
     Output("ecb-status",    "children", allow_duplicate=True),
-    Output("store-loading-state", "data", allow_duplicate=True),
     Output("main-tabs",     "value",    allow_duplicate=True),
     Input("btn-ecb-custom", "n_clicks"),
     State("ecb-custom-flow",  "value"),
@@ -1270,16 +1269,15 @@ def ecb_download_preset(clicks, existing):
     prevent_initial_call=True,
 )
 def ecb_download_custom(n, flow, key, label, existing):
-    _done = {"active": False}
     if not flow or not key:
-        return no_update, "⚠ Inserisci flow e key.", _done, no_update
+        return no_update, "⚠ Inserisci flow e key.", no_update
     flow  = flow.strip().upper()
     key   = key.strip()
     label = (label or f"ECB {flow}/{key[:20]}").strip()
 
     series = download_ecb_series(flow, key, label)
     if series is None or series.empty:
-        return no_update, f"❌ Nessun dato per {flow}/{key[:40]}. Verifica flow e key.", _done, no_update
+        return no_update, f"❌ Nessun dato per {flow}/{key[:40]}. Verifica flow e key.", no_update
 
     store = existing or {}
     store[label] = {
@@ -1290,25 +1288,9 @@ def ecb_download_custom(n, flow, key, label, existing):
     d1  = series.index.min().strftime("%Y-%m")
     d2  = series.index.max().strftime("%Y-%m")
     msg = f"✅  '{label}'  |  {len(series)} obs  |  {d1} → {d2}"
-    return store, msg, _done, "tab-data"
+    return store, msg, "tab-data"
 
 
-# ── Clientside: mostra overlay anche per bottoni ECB ─────────────────────────
-app.clientside_callback(
-    """
-    function(...args) {
-        var n = args.slice(0, args.length - 1);
-        var triggered = window.dash_clientside.callback_context &&
-                        window.dash_clientside.callback_context.triggered;
-        if (!triggered || triggered.length === 0) return window.dash_clientside.no_update;
-        return {"active": true};
-    }
-    """,
-    Output("store-loading-state", "data", allow_duplicate=True),
-    Input({"type": "btn-ecb-series", "flow": ALL, "key": ALL, "label": ALL}, "n_clicks"),
-    Input("btn-ecb-custom", "n_clicks"),
-    prevent_initial_call=True,
-)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
