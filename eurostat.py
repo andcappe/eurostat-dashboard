@@ -937,10 +937,17 @@ app.layout = html.Div([
             html.Span(" — dati economici europei liberi e gratuiti",
                       style={"font-size": "12px", "color": "#888", "margin-left": "10px"}),
         ], style={"display": "flex", "align-items": "center"}),
-        html.A("eurostat.ec.europa.eu", href="https://ec.europa.eu/eurostat",
-               target="_blank",
-               style={"font-size": "11px", "color": "#1565c0",
-                      "text-decoration": "none"}),
+        html.Div([
+            html.Span(id="header-series-count", children="0 serie caricate",
+                      style={"font-size": "11px", "color": "#1565c0",
+                             "background": "#d6eaf8", "border-radius": "12px",
+                             "padding": "3px 10px", "margin-right": "14px",
+                             "font-weight": "600"}),
+            html.A("eurostat.ec.europa.eu", href="https://ec.europa.eu/eurostat",
+                   target="_blank",
+                   style={"font-size": "11px", "color": "#1565c0",
+                          "text-decoration": "none"}),
+        ], style={"display": "flex", "align-items": "center"}),
     ], style={"display": "flex", "justify-content": "space-between", "align-items": "center",
               "padding": "10px 20px", "background": "#eaf4fb",
               "border-bottom": "2px solid #1565c0"}),
@@ -1175,6 +1182,7 @@ def tick_progress(n):
     Output("store-series",         "data"),
     Output("download-status",      "children"),
     Output("store-loading-state",  "data", allow_duplicate=True),
+    Output("main-tabs",            "value"),
     Input("btn-download",          "n_clicks"),
     State("store-selected-code",   "data"),
     State("store-dims-meta",       "data"),
@@ -1188,9 +1196,9 @@ def tick_progress(n):
 def do_download(n, code, meta, dim_vals, dim_ids, geo, label, existing):
     _done = {"active": False}
     if not code:
-        return no_update, "⚠ Seleziona prima un dataset.", _done
+        return no_update, "⚠ Seleziona prima un dataset.", _done, no_update
     if not geo:
-        return no_update, "⚠ Seleziona un paese.", _done
+        return no_update, "⚠ Seleziona un paese.", _done, no_update
 
     # Build dimension filters
     dim_filters = {}
@@ -1201,7 +1209,7 @@ def do_download(n, code, meta, dim_vals, dim_ids, geo, label, existing):
 
     series = download_series(code, dim_filters, geo)
     if series is None or series.empty:
-        return no_update, f"❌ Nessun dato per {code} / {geo} con i filtri selezionati.", _done
+        return no_update, f"❌ Nessun dato per {code} / {geo} con i filtri selezionati.", _done, no_update
 
     # Build series name
     series_name = label.strip() if label and label.strip() else (
@@ -1219,7 +1227,7 @@ def do_download(n, code, meta, dim_vals, dim_ids, geo, label, existing):
     d1 = series.index.min().strftime("%Y-%m")
     d2 = series.index.max().strftime("%Y-%m")
     msg = f"✅  '{series_name}'  |  {n_obs} obs  |  {d1} → {d2}"
-    return store, msg, _done
+    return store, msg, _done, "tab-data"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1284,6 +1292,24 @@ def refresh_series_list(store):
             ),
         ], style={"display": "flex", "align-items": "center", "margin-bottom": "5px"}))
     return rows, mn, mx, val, marks
+
+
+@app.callback(
+    Output("header-series-count", "children"),
+    Output("header-series-count", "style"),
+    Input("store-series", "data"),
+)
+def update_header_badge(store):
+    n = len(store) if store else 0
+    label = f"{'▶ ' if n > 0 else ''}{n} serie caricate"
+    style = {
+        "font-size": "11px", "font-weight": "600",
+        "border-radius": "12px", "padding": "3px 10px", "margin-right": "14px",
+        "color": "white" if n > 0 else "#1565c0",
+        "background": "#1565c0" if n > 0 else "#d6eaf8",
+        "cursor": "default",
+    }
+    return label, style
 
 
 @app.callback(
