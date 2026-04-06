@@ -10,6 +10,7 @@ Deploy online : Render / Railway / Hugging Face Spaces / Fly.io
 """
 
 import io, json, math, warnings, urllib.request, urllib.parse
+import xml.etree.ElementTree as ET
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -87,7 +88,20 @@ LAG_OPTIONS = [{"label": f"L{k}", "value": k} for k in range(13)]
 # FUNZIONI API EUROSTAT
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_TOC_CACHE: dict | None = None   # cache in memoria del catalogo Eurostat
+_CATALOGUE: dict | None = None  # {dataflows: {code: title}, tree: [...]}
+
+_IT_EN = {
+    "prezzi": "price", "inflazione": "inflation", "moneta": "money",
+    "lavoro": "labour", "disoccupazione": "unemployment",
+    "pil": "gdp", "commercio": "trade", "popolazione": "population",
+    "energia": "energy", "salari": "wages", "debito": "debt",
+    "banca": "bank", "tasso": "rate", "esportazioni": "export",
+    "importazioni": "import", "produzione": "production",
+    "costruzioni": "construction", "agricoltura": "agriculture",
+    "istruzione": "education", "salute": "health", "trasporti": "transport",
+    "occupazione": "employment", "pensioni": "pension", "poverta": "poverty",
+    "ricerca": "research", "innovazione": "innovation", "digitale": "digital",
+}
 
 
 def _fetch_json(url: str, timeout: int = 35) -> dict | None:
@@ -101,66 +115,103 @@ def _fetch_json(url: str, timeout: int = 35) -> dict | None:
         return None
 
 
+def _fetch_xml(path: str, timeout: int = 60):
+    """Scarica e parsa XML dall'API SDMX di Eurostat."""
+    url = f"{EUROSTAT_BASE}/sdmx/2.1/{path}"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "EurostatExplorer/2.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return ET.fromstring(r.read().decode("utf-8"))
+    except Exception as e:
+        print(f"  XML error [{path[:70]}]: {e}")
+        return None
+
+
+def _build_catalogue() -> dict:
+    """
+    Costruisce il catalogo completo tramite API SDMX Eurostat.
+    Ritorna {dataflows: {code: title}, tree: [nodi gerarchici]}.
+    """
+    NS_S = "http://www.sdmx.org/resources/sdmxml/schemas/v2_1/structure"
+    NS_C = "http://www.sdmx.org/resources/sdmxml/schemas/v2_1/common"
+
+    # ── 1. Dataflow: codice → titolo ─────────────────────────────────────────
+    print("  [catalogue] carico dataflow list...")
+    df_root = _fetch_xml("dataflow/ESTAT", timeout=90)
+    dataflows: dict[str, str] = {}
+    if df_root:
+        for df in df_root.iter(f"{{{NS_S}}}Dataflow"):
+            code = df.get("id", "")
+            name = df.find(f".//{{{NS_C}}}Name")
+            if code and name is not None and name.text:
+                dataflows[code] = name.text.strip()
+    print(f"  [catalogue] {len(dataflows)} dataflow trovati")
+
+    # ── 2. CategoryScheme: struttura ad albero ───────────────────────────────
+    print("  [catalogue] carico categoryscheme...")
+    cs_root = _fetch_xml("categoryscheme/ESTAT", timeout=45)
+
+    # ── 3. Categorisation: categoria → [dataflow] ────────────────────────────
+    print("  [catalogue] carico categorisation (60-120s)...")
+    cat_root = _fetch_xml("categorisation/ESTAT", timeout=120)
+    cat_ds_map: dict[str, list] = {}
+    if cat_root:
+        for item in cat_root.iter(f"{{{NS_S}}}Categorisation"):
+            src = item.find(f".//{{{NS_S}}}Source")
+            tgt = item.find(f".//{{{NS_S}}}Target")
+            if src is None or tgt is None:
+                continue
+            df_ref  = src.find(f".//{{{NS_C}}}Ref")
+            cat_ref = tgt.find(f".//{{{NS_C}}}Ref")
+            if df_ref is None or cat_ref is None:
+                continue
+            df_code = df_ref.get("id", "")
+            cat_id  = cat_ref.get("id", "")
+            if df_code and cat_id:
+                cat_ds_map.setdefault(cat_id, []).append(df_code)
+        print(f"  [catalogue] {len(cat_ds_map)} categorie con dataset")
+    else:
+        print("  [catalogue] categorisation non disponibile, albero senza dataset")
+
+    # ── 4. Costruisce albero dalla CategoryScheme ─────────────────────────────
+    def _parse_cat(node):
+        cid     = node.get("id", "")
+        name_el = node.find(f".//{{{NS_C}}}Name")
+        name    = name_el.text.strip() if name_el is not None and name_el.text else cid
+        children = [_parse_cat(c) for c in node
+                    if c.tag == f"{{{NS_S}}}Category"]
+        ds_codes = cat_ds_map.get(cid, [])
+        datasets = [(c, dataflows.get(c, c)) for c in ds_codes if c in dataflows]
+        return {"id": cid, "name": name, "children": children, "datasets": datasets}
+
+    tree = []
+    if cs_root:
+        for cs in cs_root.iter(f"{{{NS_S}}}CategoryScheme"):
+            for cat in cs:
+                if cat.tag == f"{{{NS_S}}}Category":
+                    tree.append(_parse_cat(cat))
+            break
+
+    return {"dataflows": dataflows, "tree": tree}
+
+
 def search_datasets(query: str) -> list[dict]:
-    """
-    Cerca dataset nel catalogo Eurostat per parola chiave.
-    Usa il TOC completo (stabile) filtrando in Python.
-    Ritorna lista di dict {code, title, lastUpdate}.
-    """
-    kws = query.strip().lower().split()
-    if not kws:
+    """Cerca nei dataflow caricati in memoria dal catalogo SDMX."""
+    global _CATALOGUE
+    if not _CATALOGUE or not _CATALOGUE.get("dataflows"):
         return []
-
-    # ── Traduzione termini italiani comuni → inglese ─────────────────────────
-    _IT_EN = {
-        "prezzi": "price", "inflazione": "inflation", "moneta": "money",
-        "lavoro": "labour", "disoccupazione": "unemployment",
-        "pil": "gdp", "commercio": "trade", "popolazione": "population",
-        "energia": "energy", "salari": "wages", "debito": "debt",
-        "banca": "bank", "tasso": "rate", "esportazioni": "export",
-        "importazioni": "import", "produzione": "production",
-        "costruzioni": "construction", "agricoltura": "agriculture",
-        "istruzione": "education", "salute": "health", "trasporti": "transport",
-    }
+    kws    = query.strip().lower().split()
     kws_en = [_IT_EN.get(k, k) for k in kws]
-
-    # ── TOC completo Eurostat (cachato in memoria dopo il primo download) ────────
-    global _TOC_CACHE
-    if _TOC_CACHE is None:
-        toc_url = f"{EUROSTAT_BASE}/catalogue/toc/json?lang=en"
-        _TOC_CACHE = _fetch_json(toc_url, timeout=50)
-    toc = _TOC_CACHE
-    if toc is None:
-        return []
-
-    results = []
 
     def _match(text: str) -> bool:
         t = text.lower()
-        # match se almeno uno dei termini (originale o tradotto) è presente
-        for orig, eng in zip(kws, kws_en):
-            if orig in t or eng in t:
-                return True
-        return False
+        return any(k in t or e in t for k, e in zip(kws, kws_en))
 
-    def _walk(node):
-        if isinstance(node, list):
-            for item in node:
-                _walk(item)
-        elif isinstance(node, dict):
-            code  = node.get("code", "")
-            title = node.get("title", node.get("label", ""))
-            if isinstance(title, dict):
-                title = title.get("en", "")
-            ntype = node.get("type", "")
-            if code and ntype in ("dataset", "table") and _match(code + " " + title):
-                lu = node.get("lastUpdate", node.get("dataEnd", ""))
-                results.append({"code": code, "title": str(title), "lastUpdate": lu})
-            for child in node.get("children", []):
-                _walk(child)
-
-    _walk(toc)
-    return results[:80]
+    results = []
+    for code, title in _CATALOGUE["dataflows"].items():
+        if _match(code + " " + title):
+            results.append({"code": code, "title": title, "lastUpdate": ""})
+    return results[:100]
 
 
 def get_dataset_metadata(code: str) -> dict | None:
@@ -316,6 +367,58 @@ def _make_table(rows: list[list], header_color: str = "#1565c0") -> html.Table:
         ])
     ], style={"border-collapse": "collapse", "width": "100%",
                "font-family": "monospace", "margin-top": "8px"})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RENDERING ALBERO CATEGORIE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _ds_row(code: str, title: str) -> html.Div:
+    return html.Div([
+        html.Span(code,
+                  style={"font-family": "monospace", "font-size": "10px",
+                         "color": "#1565c0", "min-width": "135px",
+                         "display": "inline-block", "flex-shrink": "0"}),
+        html.Span(title[:90] + ("…" if len(title) > 90 else ""),
+                  style={"font-size": "11px", "color": "#333", "flex": "1"}),
+        html.Button("Seleziona",
+                    id={"type": "btn-select-ds", "index": code}, n_clicks=0,
+                    style={"font-size": "9px", "padding": "2px 10px",
+                           "background": "#1565c0", "color": "white",
+                           "border": "none", "border-radius": "3px",
+                           "cursor": "pointer", "flex-shrink": "0"}),
+    ], style={"display": "flex", "align-items": "center", "padding": "4px 8px",
+              "border-bottom": "1px solid #eee", "gap": "8px"})
+
+
+def _render_tree(nodes: list, depth: int = 0) -> list:
+    items = []
+    for node in nodes:
+        children = node.get("children", [])
+        datasets = node.get("datasets", [])
+        child_els = _render_tree(children, depth + 1)
+        ds_rows   = [_ds_row(c, t) for c, t in datasets]
+        inner     = child_els + ds_rows
+        if not inner:
+            continue
+        if depth == 0:
+            bg, fw, fs, col = "#ddeaf7", "800", "13px", "#0d2b45"
+        elif depth == 1:
+            bg, fw, fs, col = "#eaf4fb", "700", "12px", "#1a3a5c"
+        else:
+            bg, fw, fs, col = "transparent", "600", "11px", "#333"
+        items.append(html.Details([
+            html.Summary(node["name"],
+                         style={"cursor": "pointer", "padding": "5px 10px",
+                                "font-size": fs, "font-weight": fw, "color": col,
+                                "background": bg, "border-radius": "4px",
+                                "user-select": "none"}),
+            html.Div(inner,
+                     style={"padding-left": "14px",
+                            "border-left": "2px solid #aed6f1",
+                            "margin-left": "8px"}),
+        ], style={"margin-bottom": "3px"}))
+    return items
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -643,8 +746,30 @@ def _tab_adl():
     return html.Div([sidebar, main], style={"display": "flex"})
 
 
+def _tab_browse():
+    """Tab ② — Albero categorie del catalogo Eurostat."""
+    return html.Div([
+        html.Div("SFOGLIA IL CATALOGO PER CATEGORIA", style=_HDR),
+        html.P("Espandi le categorie cliccando sul titolo. "
+               "Clicca 'Seleziona' su un dataset per usarlo nelle analisi.",
+               style={"font-size": "11px", "color": "#555", "margin-bottom": "8px"}),
+        html.Div([
+            html.Button("Aggiorna albero", id="btn-refresh-tree", n_clicks=0,
+                        style={**_BTN, "width": "auto", "padding": "5px 14px",
+                               "font-size": "11px"}),
+            html.Span(id="browse-status",
+                      style={"font-size": "10px", "color": "#777",
+                             "margin-left": "12px", "font-style": "italic"}),
+        ], style={"display": "flex", "align-items": "center", "margin-bottom": "12px"}),
+        html.Div(id="browse-tree-container",
+                 children=html.Div("Caricamento catalogo in corso — riprova tra qualche secondo...",
+                                   style={"color": "#888", "font-style": "italic",
+                                          "padding": "24px"})),
+    ], style={"padding": "16px", "max-width": "960px"})
+
+
 def _tab_info():
-    """Tab ⑤ — Guida all'uso."""
+    """Tab ⑥ — Guida all'uso."""
     def _section(title, items):
         return html.Div([
             html.H4(title, style={"color": "#1565c0", "margin-bottom": "6px"}),
@@ -766,12 +891,42 @@ app.layout = html.Div([
     # ── Tabs ────────────────────────────────────────────────────────────────
     dcc.Tabs(id="main-tabs", value="tab-search", children=[
         dcc.Tab(label="🔍  Ricerca",    value="tab-search",  children=[_tab_search()]),
+        dcc.Tab(label="🗂  Sfoglia",    value="tab-browse",  children=[_tab_browse()]),
         dcc.Tab(label="📊  Dati",       value="tab-data",    children=[_tab_data()]),
         dcc.Tab(label="〜  ARIMA",      value="tab-arima",   children=[_tab_arima()]),
         dcc.Tab(label="📐  ADL",        value="tab-adl",     children=[_tab_adl()]),
         dcc.Tab(label="ℹ  Guida",      value="tab-info",    children=[_tab_info()]),
     ], style={"font-size": "12px"}),
 ])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CALLBACKS — TAB SFOGLIA
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.callback(
+    Output("browse-tree-container", "children"),
+    Output("browse-status", "children"),
+    Input("btn-refresh-tree", "n_clicks"),
+    Input("main-tabs", "value"),
+    prevent_initial_call=False,
+)
+def render_browse_tab(n_refresh, tab):
+    if tab != "tab-browse":
+        raise PreventUpdate
+    global _CATALOGUE
+    if not _CATALOGUE:
+        return (html.Div("Catalogo non ancora caricato. Clicca 'Aggiorna albero' tra qualche secondo.",
+                         style={"color": "#e53935", "font-style": "italic", "padding": "20px"}),
+                "non disponibile")
+    tree = _CATALOGUE.get("tree", [])
+    n_df = len(_CATALOGUE.get("dataflows", {}))
+    if not tree:
+        return (html.Div("Albero categorie non disponibile.",
+                         style={"color": "#888", "padding": "20px"}),
+                f"{n_df} dataset")
+    els = _render_tree(tree)
+    return html.Div(els), f"{n_df} dataset in catalogo"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -830,24 +985,33 @@ def do_search(n, query):
 )
 def select_dataset(clicks, results):
     ctx = callback_context
-    if not ctx.triggered or not results:
+    if not ctx.triggered:
         raise PreventUpdate
     prop = ctx.triggered[0]["prop_id"]
     try:
         code = json.loads(prop.split(".")[0])["index"]
     except Exception:
         raise PreventUpdate
-    hit = next((r for r in results if r["code"] == code), None)
-    if not hit:
+    # cerca titolo prima in store-search-results, poi nel catalogo globale
+    title = None
+    if results:
+        hit = next((r for r in results if r["code"] == code), None)
+        if hit:
+            title = hit["title"]
+    if title is None and _CATALOGUE:
+        title = _CATALOGUE.get("dataflows", {}).get(code, code)
+    if title is None:
         raise PreventUpdate
     info = html.Div([
-        html.B(f"{hit['code']}  ", style={"color": "#1565c0", "font-size": "13px"}),
-        html.Span(hit["title"], style={"font-size": "12px"}),
+        html.B(f"{code}  ", style={"color": "#1565c0", "font-size": "13px"}),
+        html.Span(title, style={"font-size": "12px"}),
         html.Br(),
-        html.A(f"Vedi su Eurostat →",
-               href=f"https://ec.europa.eu/eurostat/web/products-datasets/-/{hit['code']}",
+        html.A("Vedi su Eurostat →",
+               href=f"https://ec.europa.eu/eurostat/web/products-datasets/-/{code}",
                target="_blank",
                style={"font-size": "10px", "color": "#1565c0"}),
+        html.Span("  — vai al tab Ricerca per caricare le dimensioni e scaricare.",
+                  style={"font-size": "10px", "color": "#888"}),
     ])
     return code, info
 
@@ -1823,20 +1987,24 @@ def run_adl(n, store, y_col, y_tr, ar_lags, x_active, x_ids, x_trs, x_lags_list,
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# AVVIO — precarica il TOC Eurostat in background al lancio del server
+# AVVIO — precarica il catalogo SDMX Eurostat in background
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import threading
 
-def _preload_toc():
-    global _TOC_CACHE
-    print("  [startup] precaricamento catalogo Eurostat...")
-    toc_url = f"{EUROSTAT_BASE}/catalogue/toc/json?lang=en"
-    _TOC_CACHE = _fetch_json(toc_url, timeout=60)
-    n = sum(1 for _ in str(_TOC_CACHE)) if _TOC_CACHE else 0
-    print(f"  [startup] catalogo pronto ({n:,} chars)")
+def _preload_catalogue():
+    global _CATALOGUE
+    print("  [startup] costruzione catalogo SDMX Eurostat...")
+    try:
+        _CATALOGUE = _build_catalogue()
+        n_df = len(_CATALOGUE.get("dataflows", {}))
+        n_tr = len(_CATALOGUE.get("tree", []))
+        print(f"  [startup] catalogo pronto: {n_df} dataset, {n_tr} categorie top-level")
+    except Exception as e:
+        print(f"  [startup] errore catalogo: {e}")
+        _CATALOGUE = {"dataflows": {}, "tree": []}
 
-threading.Thread(target=_preload_toc, daemon=True).start()
+threading.Thread(target=_preload_catalogue, daemon=True).start()
 
 if __name__ == "__main__":
     app.run(debug=True, port=8052)
