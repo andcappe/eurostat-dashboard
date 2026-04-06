@@ -9,7 +9,7 @@ Produzione    : gunicorn eurostat:server --workers 2 --timeout 120
 Deploy online : Render / Railway / Hugging Face Spaces / Fly.io
 """
 
-import io, json, math, warnings, urllib.request, urllib.parse
+import io, json, math, warnings, gzip, urllib.request, urllib.parse
 import xml.etree.ElementTree as ET
 import numpy as np
 import pandas as pd
@@ -171,10 +171,15 @@ _IT_EN = {
 
 def _fetch_json(url: str, timeout: int = 35) -> dict | None:
     try:
-        req = urllib.request.Request(
-            url, headers={"User-Agent": "EurostatExplorer/2.0 (public dashboard)"})
+        req = urllib.request.Request(url, headers={
+            "User-Agent":      "EurostatExplorer/2.0 (public dashboard)",
+            "Accept-Encoding": "gzip, deflate",
+        })
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode("utf-8"))
+            raw_bytes = r.read()
+            if r.headers.get("Content-Encoding") == "gzip":
+                raw_bytes = gzip.decompress(raw_bytes)
+            return json.loads(raw_bytes.decode("utf-8"))
     except Exception as e:
         print(f"  HTTP error [{url[:90]}]: {e}")
         return None
@@ -264,21 +269,35 @@ def _build_catalogue() -> dict:
 # FUNZIONI API BCE (ECB Statistical Data Warehouse)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+_ECB_CACHE: dict[str, pd.Series] = {}   # cache in memoria: "flow/key" → Series
+
+
 def download_ecb_series(flow: str, key: str, label: str) -> pd.Series | None:
     """
     Scarica una serie dall'API SDMX-JSON della BCE.
+    Usa cache in memoria: la seconda chiamata è istantanea.
     flow: es. 'BSI', 'EXR', 'ICP', 'FM'
     key : es. 'M.U2.EUR.LT.F.A52.M.I.U6.2150.Z01.E'
     """
+    cache_key = f"{flow}/{key}"
+    if cache_key in _ECB_CACHE:
+        s = _ECB_CACHE[cache_key].copy()
+        s.name = label
+        return s
+
     url = (f"{ECB_BASE}/data/{flow}/{key}"
            f"?format=jsondata&detail=dataonly&startPeriod=1990-01")
     try:
         req = urllib.request.Request(url, headers={
-            "User-Agent": "EurostatExplorer/2.0",
-            "Accept":     "application/json",
+            "User-Agent":      "EurostatExplorer/2.0",
+            "Accept":          "application/json",
+            "Accept-Encoding": "gzip, deflate",
         })
-        with urllib.request.urlopen(req, timeout=40) as r:
-            raw = json.loads(r.read().decode("utf-8"))
+        with urllib.request.urlopen(req, timeout=25) as r:
+            raw_bytes = r.read()
+            if r.headers.get("Content-Encoding") == "gzip":
+                raw_bytes = gzip.decompress(raw_bytes)
+            raw = json.loads(raw_bytes.decode("utf-8"))
     except Exception as e:
         print(f"  ECB error [{flow}/{key[:40]}]: {e}")
         return None
@@ -321,8 +340,11 @@ def download_ecb_series(flow: str, key: str, label: str) -> pd.Series | None:
             s.index = pd.to_datetime(s.index, errors="coerce")
             s = s.dropna()
 
+        s = s.sort_index().dropna()
+        _ECB_CACHE[cache_key] = s   # salva in cache senza label
+        s = s.copy()
         s.name = label
-        return s.sort_index().dropna()
+        return s
 
     except Exception as e:
         print(f"  ECB parse [{flow}/{key[:40]}]: {e}")
