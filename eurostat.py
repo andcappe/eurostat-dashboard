@@ -216,40 +216,57 @@ def search_datasets(query: str) -> list[dict]:
 
 def get_dataset_metadata(code: str) -> dict | None:
     """
-    Recupera le dimensioni e le categorie di un dataset Eurostat.
-    Ritorna: {dim_id: {label: str, categories: {cat_code: cat_label}}}
-    Fa due tentativi con geo diversi per massimizzare le probabilità di risposta.
+    Recupera le dimensioni e le categorie di un dataset Eurostat senza filtri.
+    Prima prova senza geo (ottiene tutte le categorie), poi con geo hint.
     """
-    for geo_hint in ["DE", "EU27_2020", "EA20", "FR"]:
-        url = f"{EUROSTAT_BASE}/statistics/1.0/data/{code}?geo={geo_hint}&lang=en"
-        raw = _fetch_json(url, timeout=30)
-        if raw and "dimension" in raw:
-            dims_raw = raw["dimension"]
-            ids      = raw.get("id", list(dims_raw.keys()))
-            result   = {}
-            for dim_id in ids:
-                dim_info = dims_raw.get(dim_id, {})
-                label    = dim_info.get("label", dim_id)
-                cats_raw = dim_info.get("category", {})
-                index    = cats_raw.get("index", {})
-                labels   = cats_raw.get("label", {})
-                if isinstance(index, dict):
-                    ordered = sorted(index.items(), key=lambda x: x[1])
-                    cats = {k: labels.get(k, k) for k, _ in ordered}
-                elif isinstance(index, list):
-                    cats = {k: labels.get(k, k) for k in index}
-                else:
-                    cats = {}
-                result[dim_id] = {"label": label, "categories": cats}
-            if result:
-                return result
+    # Prova prima senza filtri — dà più categorie ma risposta più lenta
+    attempts = [
+        f"{EUROSTAT_BASE}/statistics/1.0/data/{code}?lang=en",
+        f"{EUROSTAT_BASE}/statistics/1.0/data/{code}?geo=EA20&lang=en",
+        f"{EUROSTAT_BASE}/statistics/1.0/data/{code}?geo=EU27_2020&lang=en",
+        f"{EUROSTAT_BASE}/statistics/1.0/data/{code}?geo=DE&lang=en",
+        f"{EUROSTAT_BASE}/statistics/1.0/data/{code}?geo=IT&lang=en",
+        f"{EUROSTAT_BASE}/statistics/1.0/data/{code}?geo=FR&lang=en",
+    ]
+    for url in attempts:
+        raw = _fetch_json(url, timeout=40)
+        if not raw or "dimension" not in raw:
+            continue
+        dims_raw = raw["dimension"]
+        ids      = raw.get("id", list(dims_raw.keys()))
+        result   = {}
+        for dim_id in ids:
+            dim_info = dims_raw.get(dim_id, {})
+            label    = dim_info.get("label", dim_id)
+            cats_raw = dim_info.get("category", {})
+            index    = cats_raw.get("index", {})
+            labels   = cats_raw.get("label", {})
+            if isinstance(index, dict):
+                ordered = sorted(index.items(), key=lambda x: x[1])
+                cats = {k: labels.get(k, k) for k, _ in ordered}
+            elif isinstance(index, list):
+                cats = {k: labels.get(k, k) for k in index}
+            else:
+                cats = {}
+            result[dim_id] = {"label": label, "categories": cats}
+        if result:
+            return result
     return None
+
+
+def _dim_cats_ordered(dim_info: dict) -> list:
+    """Ritorna la lista ordinata dei codici categoria per una dimensione."""
+    idx = dim_info.get("category", {}).get("index", {})
+    if isinstance(idx, dict):
+        return [k for k, _ in sorted(idx.items(), key=lambda x: x[1])]
+    return list(idx) if idx else []
 
 
 def download_series(code: str, dim_filters: dict, geo: str) -> pd.Series | None:
     """
     Scarica una serie temporale dal dataset Eurostat.
     dim_filters: {dim_code: category_code} per ogni dimensione non-geo non-time.
+    Calcola correttamente l'offset nell'array piatto per dati multidimensionali.
     """
     all_params = {**dim_filters, "geo": geo}
     qstr = "&".join(f"{k}={v}" for k, v in all_params.items())
@@ -262,22 +279,62 @@ def download_series(code: str, dim_filters: dict, geo: str) -> pd.Series | None:
         sizes  = raw["size"]
         dims   = raw["dimension"]
         values = raw["value"]
+        if not values:
+            return None
         if "time" not in ids:
             return None
+
+        # Ordine delle categorie temporali
         t_idx     = ids.index("time")
-        time_cats = list(dims["time"]["category"]["index"].keys())
-        stride    = 1
-        for s in sizes[t_idx + 1:]:
-            stride *= s
+        time_cats = _dim_cats_ordered(dims["time"])
+
+        # ── Calcola stride e offset base ─────────────────────────────────────
+        # Stride di ogni dimensione = prodotto delle size di tutte le dim successive
+        n  = len(ids)
+        strides = [1] * n
+        for i in range(n - 2, -1, -1):
+            strides[i] = strides[i + 1] * sizes[i + 1]
+
+        time_stride = strides[t_idx]
+
+        # Offset base: posizione delle dimensioni non-time nei filtri selezionati
+        selected = {**dim_filters, "geo": geo}
+        base_offset = 0
+        for i, dim_id in enumerate(ids):
+            if dim_id == "time":
+                continue
+            cats = _dim_cats_ordered(dims[dim_id])
+            sel_val = selected.get(dim_id)
+            if sel_val and sel_val in cats:
+                sel_idx = cats.index(sel_val)
+            else:
+                sel_idx = 0   # default: primo valore disponibile
+            base_offset += sel_idx * strides[i]
+
+        # ── Estrai la serie temporale ─────────────────────────────────────────
         result = {}
         for i, tcat in enumerate(time_cats):
-            v = values.get(str(i * stride))
+            flat_idx = base_offset + i * time_stride
+            v = values.get(str(flat_idx))
             if v is not None:
                 result[tcat] = float(v)
+
+        # Se non trovato nulla con l'offset, prova scansione lineare come fallback
+        if not result:
+            all_vals = [(int(k), float(v)) for k, v in values.items()]
+            all_vals.sort()
+            n_time = len(time_cats)
+            if len(all_vals) >= n_time:
+                for i, tcat in enumerate(time_cats):
+                    if i < len(all_vals):
+                        result[tcat] = all_vals[i][1]
+
         if not result:
             return None
+
         s = pd.Series(result).sort_index()
-        # ── Parse formati data Eurostat ──────────────────────────────────────
+
+        # ── Parse formati data Eurostat ───────────────────────────────────────
         sample = str(s.index[0])
         if "-Q" in sample:
             s.index = pd.PeriodIndex(s.index, freq="Q").to_timestamp()
